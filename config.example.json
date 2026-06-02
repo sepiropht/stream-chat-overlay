@@ -1,0 +1,9 @@
+{
+  "twitch": {
+    "channel": "ta_chaine_twitch"
+  },
+  "youtube": {
+    "apiKey": "AIza...",
+    "videoId": ""
+  }
+}
