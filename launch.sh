@@ -3,7 +3,7 @@
 # Utilise XWayland pour pouvoir piquer la fenêtre "toujours au-dessus" via xdotool
 
 set -e
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # Fermer proprement toute instance existante (Chromium + serveur Bun)
 pkill -9 -f "user-data-dir=.*chromium-stream-chat" 2>/dev/null || true
