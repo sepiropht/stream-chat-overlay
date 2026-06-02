@@ -1,12 +1,12 @@
 const configPath = `${import.meta.dir}/config.json`;
 
 interface Config {
-  twitch: { channel: string };
+  twitch: { channel: string; clientId: string; clientSecret: string };
   youtube: { apiKey: string; videoId: string };
 }
 
 let config: Config = {
-  twitch: { channel: "" },
+  twitch: { channel: "", clientId: "", clientSecret: "" },
   youtube: { apiKey: "", videoId: "" },
 };
 
@@ -86,6 +86,7 @@ function connectTwitch(channel: string) {
         username: tags["display-name"] || "unknown",
         message: m[1],
         color: color === "" ? "#9147FF" : color,
+        emotes: tags["emotes"] || "",
         ts: Date.now(),
       });
     }
@@ -189,12 +190,70 @@ async function pollYoutube(apiKey: string) {
   }
 }
 
+// ── Viewer counts ─────────────────────────────────────────────────────────────
+
+let viewersTwitch = 0;
+let viewersYoutube = 0;
+
+function broadcastViewers() {
+  broadcast({ type: "viewers", twitch: viewersTwitch, youtube: viewersYoutube });
+}
+
+// Twitch: client credentials token + stream viewers
+let twitchToken = "";
+let twitchTokenExpiry = 0;
+
+async function getTwitchToken(clientId: string, clientSecret: string): Promise<string> {
+  if (twitchToken && Date.now() < twitchTokenExpiry) return twitchToken;
+  const res = await fetch(
+    `https://id.twitch.tv/oauth2/token?client_id=${clientId}&client_secret=${clientSecret}&grant_type=client_credentials`,
+    { method: "POST" }
+  );
+  const data = await res.json();
+  twitchToken = data.access_token ?? "";
+  twitchTokenExpiry = Date.now() + (data.expires_in ?? 3600) * 1000 - 60_000;
+  return twitchToken;
+}
+
+async function pollTwitchViewers() {
+  const { clientId, clientSecret, channel } = config.twitch;
+  if (!clientId || !clientSecret || !channel) return;
+  try {
+    const token = await getTwitchToken(clientId, clientSecret);
+    const res = await fetch(
+      `https://api.twitch.tv/helix/streams?user_login=${encodeURIComponent(channel)}`,
+      { headers: { "Client-Id": clientId, "Authorization": `Bearer ${token}` } }
+    );
+    const data = await res.json();
+    viewersTwitch = data.data?.[0]?.viewer_count ?? 0;
+    broadcastViewers();
+  } catch {}
+  setTimeout(pollTwitchViewers, 60_000);
+}
+
+// YouTube: concurrentViewers from liveStreamingDetails (reuses existing API key + videoId)
+async function pollYoutubeViewers() {
+  const { apiKey, videoId } = config.youtube;
+  if (!apiKey || !videoId) return;
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${encodeURIComponent(videoId)}&key=${encodeURIComponent(apiKey)}`
+    );
+    const data = await res.json();
+    viewersYoutube = parseInt(data.items?.[0]?.liveStreamingDetails?.concurrentViewers ?? "0", 10);
+    broadcastViewers();
+  } catch {}
+  setTimeout(pollYoutubeViewers, 60_000);
+}
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 
 if (config.twitch.channel) connectTwitch(config.twitch.channel);
 if (config.youtube.apiKey && config.youtube.videoId) {
   startYoutube(config.youtube.apiKey, config.youtube.videoId);
 }
+pollTwitchViewers();
+pollYoutubeViewers();
 
 // ── Server ────────────────────────────────────────────────────────────────────
 
@@ -205,6 +264,7 @@ const server = Bun.serve({
       clients.add(ws);
       ws.send(JSON.stringify({ type: "config", data: config }));
       ws.send(JSON.stringify({ type: "status", twitch: twitchConnected, youtube: youtubeConnected }));
+      ws.send(JSON.stringify({ type: "viewers", twitch: viewersTwitch, youtube: viewersYoutube }));
     },
     close(ws) { clients.delete(ws); },
     async message(ws, msg) {
@@ -224,7 +284,15 @@ const server = Bun.serve({
             next.youtube.videoId !== config.youtube.videoId;
 
           config.youtube = next.youtube;
-          if (ytChanged) startYoutube(config.youtube.apiKey, config.youtube.videoId);
+          if (ytChanged) {
+            startYoutube(config.youtube.apiKey, config.youtube.videoId);
+            pollYoutubeViewers();
+          }
+
+          const twCredsChanged =
+            next.twitch.clientId !== config.twitch.clientId ||
+            next.twitch.clientSecret !== config.twitch.clientSecret;
+          if (twCredsChanged) { twitchToken = ""; pollTwitchViewers(); }
 
           await saveConfig();
           ws.send(JSON.stringify({ type: "saved" }));

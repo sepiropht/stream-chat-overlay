@@ -18,7 +18,7 @@
       --accent:  #5c5c9e;
     }
     * { margin:0; padding:0; box-sizing:border-box; }
-    html, body { height:100%; background:#0d0d12; color:var(--text); font-family:system-ui,-apple-system,sans-serif; font-size:13px; overflow:hidden; }
+    html, body { height:100%; background:#0d0d12; color:var(--text); font-family:'Noto Color Emoji',system-ui,-apple-system,sans-serif; font-size:13px; overflow:hidden; }
     #app { height:100vh; display:flex; flex-direction:column; }
 
     /* ── Header ── */
@@ -28,11 +28,12 @@
       flex-shrink:0; -webkit-app-region:drag; user-select:none;
       backdrop-filter: blur(6px);
     }
-    #hd-left { display:flex; align-items:center; gap:8px; font-weight:600; font-size:12px; letter-spacing:.4px; }
+    #hd-left { display:flex; align-items:center; gap:10px; font-weight:600; font-size:12px; letter-spacing:.4px; }
     .si { display:flex; align-items:center; gap:4px; }
     .dot { width:7px; height:7px; border-radius:50%; background:#444; transition:background .3s; }
     .dot.on-tw { background:var(--twitch); }
     .dot.on-yt { background:var(--youtube); }
+    .viewers { font-size:11px; font-weight:700; color:#aaa; min-width:24px; }
     #hd-right { display:flex; gap:2px; -webkit-app-region:no-drag; }
     .btn { background:none; border:none; color:var(--dim); cursor:pointer; padding:4px 7px; border-radius:4px; font-size:14px; line-height:1; transition:background .12s,color .12s; }
     .btn:hover { background:var(--bg3); color:var(--text); }
@@ -48,13 +49,11 @@
 
     .msg {
       display:flex; align-items:baseline; gap:5px; flex-wrap:wrap;
-      padding:4px 7px; border-radius:5px; line-height:1.45;
-      background: var(--bg-msg);
-      backdrop-filter: blur(4px);
+      padding:3px 5px; border-radius:3px; line-height:1.45;
       animation:fadein .18s ease;
     }
-    @keyframes fadein { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
-    .msg:hover { background:rgba(0,0,0,0.75); }
+    @keyframes fadein { from{opacity:0;transform:translateX(-4px)} to{opacity:1;transform:translateX(0)} }
+    .msg:hover { background:rgba(255,255,255,.04); }
 
     .badge {
       font-size:9px; font-weight:700; padding:1px 5px; border-radius:3px;
@@ -130,12 +129,21 @@
 
   <div id="header">
     <div id="hd-left">
-      <div class="si"><span class="dot" id="dot-tw"></span><span style="color:var(--twitch);font-size:11px">TW</span></div>
-      <div class="si"><span class="dot" id="dot-yt"></span><span style="color:var(--youtube);font-size:11px">YT</span></div>
-      <span style="color:var(--dim)">Stream Chat</span>
+      <div class="si">
+        <span class="dot" id="dot-tw"></span>
+        <span style="color:var(--twitch);font-size:11px">TW</span>
+        <span class="viewers" id="viewers-tw"></span>
+      </div>
+      <div class="si">
+        <span class="dot" id="dot-yt"></span>
+        <span style="color:var(--youtube);font-size:11px">YT</span>
+        <span class="viewers" id="viewers-yt"></span>
+      </div>
+      <span style="color:var(--dim)">chat</span>
     </div>
     <div id="hd-right">
       <span id="msg-count">0</span>
+      <button class="btn" id="btn-sound" title="Son">🔔</button>
       <button class="btn" id="btn-clear" title="Effacer">🗑</button>
       <button class="btn" id="btn-settings" title="Paramètres">⚙</button>
     </div>
@@ -164,6 +172,14 @@
           <span>Nom de chaîne</span>
           <input id="s-twitch" type="text" placeholder="ta_chaine">
         </div>
+        <div class="s-field">
+          <span>Client ID <span style="color:#555">(dev.twitch.tv)</span></span>
+          <input id="s-tw-clientid" type="text" placeholder="abc123...">
+        </div>
+        <div class="s-field">
+          <span>Client Secret</span>
+          <input id="s-tw-secret" type="password" placeholder="••••••••">
+        </div>
       </div>
       <div class="s-group">
         <div class="s-title"><span style="color:var(--youtube)">●</span> YouTube</div>
@@ -185,7 +201,7 @@
 
 </div>
 <script>
-  let config = { twitch:{ channel:'' }, youtube:{ apiKey:'', videoId:'' } };
+  let config = { twitch:{ channel:'', clientId:'', clientSecret:'' }, youtube:{ apiKey:'', videoId:'' } };
   let msgCount = 0;
   let autoScroll = true;
 
@@ -199,6 +215,7 @@
   const msgCountEl= document.getElementById('msg-count');
 
   function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function fmt(n){ return n >= 1000 ? (n/1000).toFixed(1).replace('.0','') + 'k' : String(n); }
 
   // ── WebSocket ────────────────────────────────────────────────────────────────
   let ws;
@@ -209,6 +226,7 @@
       const d = JSON.parse(data);
       if (d.type === 'config')  { applyConfig(d.data); return; }
       if (d.type === 'status')  { updateStatus(d); return; }
+      if (d.type === 'viewers') { updateViewers(d); return; }
       if (d.type === 'saved')   { showSaved(); return; }
       if (d.type === 'yt_error'){ showYtError(d.message); return; }
       if (d.type === 'msg')     { addMsg(d); }
@@ -218,10 +236,19 @@
   // ── Config ───────────────────────────────────────────────────────────────────
   function applyConfig(c) {
     config = c;
-    document.getElementById('s-twitch').value = c.twitch.channel || '';
-    document.getElementById('s-apikey').value = c.youtube.apiKey || '';
-    document.getElementById('s-ytid').value   = c.youtube.videoId || '';
+    document.getElementById('s-twitch').value       = c.twitch.channel || '';
+    document.getElementById('s-tw-clientid').value  = c.twitch.clientId || '';
+    document.getElementById('s-tw-secret').value    = c.twitch.clientSecret || '';
+    document.getElementById('s-apikey').value       = c.youtube.apiKey || '';
+    document.getElementById('s-ytid').value         = c.youtube.videoId || '';
     ytInput.value = c.youtube.videoId || '';
+  }
+
+  function updateViewers({ twitch, youtube }) {
+    const tw = document.getElementById('viewers-tw');
+    const yt = document.getElementById('viewers-yt');
+    tw.textContent = twitch > 0 ? fmt(twitch) : '';
+    yt.textContent = youtube > 0 ? fmt(youtube) : '';
   }
 
   function updateStatus({ twitch, youtube }) {
@@ -235,8 +262,69 @@
     ytErr.style.display = 'block';
   }
 
+  // ── Son ──────────────────────────────────────────────────────────────────────
+  let soundEnabled = true;
+  let audioCtx = null;
+
+  function playPop() {
+    if (!soundEnabled) return;
+    try {
+      if (!audioCtx) audioCtx = new AudioContext();
+      const osc  = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(900, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(500, audioCtx.currentTime + 0.09);
+      gain.gain.setValueAtTime(0.07, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.12);
+      osc.start(audioCtx.currentTime);
+      osc.stop(audioCtx.currentTime + 0.12);
+    } catch {}
+  }
+
+  const btnSound = document.getElementById('btn-sound');
+  btnSound.addEventListener('click', () => {
+    soundEnabled = !soundEnabled;
+    btnSound.textContent = soundEnabled ? '🔔' : '🔕';
+    // Débloquer l'AudioContext au premier clic
+    if (soundEnabled && !audioCtx) { audioCtx = new AudioContext(); playPop(); }
+  });
+
+  // ── Emotes Twitch + emoji ─────────────────────────────────────────────────────
+  function renderMessage(message, emotes) {
+    // Pas d'emotes → simple escape (emoji Unicode passent tels quels)
+    if (!emotes) return esc(message);
+
+    // Parse "id:start-end,start-end/id:start-end" → liste de substitutions
+    const subs = [];
+    for (const part of emotes.split('/')) {
+      const colon = part.indexOf(':');
+      if (colon < 0) continue;
+      const id  = part.slice(0, colon);
+      for (const range of part.slice(colon + 1).split(',')) {
+        const [s, e] = range.split('-').map(Number);
+        subs.push({ id, s, e });
+      }
+    }
+    subs.sort((a, b) => a.s - b.s);
+
+    // Construire le HTML en intercalant <img> aux positions des emotes
+    let html = '';
+    let pos  = 0;
+    for (const { id, s, e } of subs) {
+      if (s > pos) html += esc(message.slice(pos, s));
+      const name = esc(message.slice(s, e + 1));
+      html += `<img src="https://static-cdn.jtvnw.net/emoticons/v2/${id}/default/dark/1.0" alt="${name}" title="${name}" style="height:1.5em;vertical-align:middle;margin:0 1px">`;
+      pos = e + 1;
+    }
+    if (pos < message.length) html += esc(message.slice(pos));
+    return html;
+  }
+
   // ── Messages ─────────────────────────────────────────────────────────────────
-  function addMsg({ platform, username, message, color }) {
+  function addMsg({ platform, username, message, color, emotes }) {
     if (empty.parentNode === msgs) msgs.removeChild(empty);
 
     const el = document.createElement('div');
@@ -246,7 +334,7 @@
       `<span class="badge badge-${platform === 'twitch' ? 'tw' : 'yt'}">${platform === 'twitch' ? 'TW' : 'YT'}</span>` +
       `<span class="msg-user" style="color:${esc(c)}">${esc(username)}</span>` +
       `<span class="msg-sep">:</span>` +
-      `<span class="msg-text">${esc(message)}</span>`;
+      `<span class="msg-text">${renderMessage(message, emotes)}</span>`;
 
     msgs.appendChild(el);
     if (autoScroll) msgs.scrollTop = msgs.scrollHeight;
@@ -254,6 +342,7 @@
 
     msgCount++;
     msgCountEl.textContent = msgCount > 999 ? '999+' : String(msgCount);
+    playPop();
   }
 
   msgs.addEventListener('scroll', () => {
@@ -278,7 +367,11 @@
 
   document.getElementById('s-save').addEventListener('click', () => {
     const c = {
-      twitch:  { channel: document.getElementById('s-twitch').value.trim() },
+      twitch:  {
+        channel:      document.getElementById('s-twitch').value.trim(),
+        clientId:     document.getElementById('s-tw-clientid').value.trim(),
+        clientSecret: document.getElementById('s-tw-secret').value.trim(),
+      },
       youtube: { apiKey: document.getElementById('s-apikey').value.trim(), videoId: document.getElementById('s-ytid').value.trim() },
     };
     ytInput.value = c.youtube.videoId;

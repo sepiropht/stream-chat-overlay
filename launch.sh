@@ -54,8 +54,8 @@ done
 if [ -n "$WID" ]; then
   # Toujours au-dessus
   xdotool windowstate --add ABOVE "$WID"
-  # Transparence 80% via _NET_WM_WINDOW_OPACITY (0xCCCCCCCC = 80%)
-  xprop -id "$WID" -f _NET_WM_WINDOW_OPACITY 32c -set _NET_WM_WINDOW_OPACITY 0xCCCCCCCC 2>/dev/null \
+  # Transparence 80% — 0xCCCCCCCC = 3435973836 en décimal
+  xprop -id "$WID" -f _NET_WM_WINDOW_OPACITY 32c -set _NET_WM_WINDOW_OPACITY 3435973836 2>/dev/null \
     && echo "✓ Fenêtre épinglée + transparence 80% (ID: $WID)" \
     || echo "✓ Fenêtre épinglée (xprop non disponible)"
 else
