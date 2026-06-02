@@ -263,7 +263,7 @@
   }
 
   // ── Son ──────────────────────────────────────────────────────────────────────
-  let soundEnabled = true;
+  let soundEnabled = false;
   let audioCtx = null;
 
   function playPop() {
@@ -325,24 +325,36 @@
 
   // ── Messages ─────────────────────────────────────────────────────────────────
   function addMsg({ platform, username, message, color, emotes }) {
-    if (empty.parentNode === msgs) msgs.removeChild(empty);
+    try {
+      if (empty.parentNode === msgs) msgs.removeChild(empty);
 
-    const el = document.createElement('div');
-    el.className = 'msg';
-    const c = (color && color !== '#000000') ? color : (platform === 'twitch' ? '#9147ff' : '#ff3030');
-    el.innerHTML =
-      `<span class="badge badge-${platform === 'twitch' ? 'tw' : 'yt'}">${platform === 'twitch' ? 'TW' : 'YT'}</span>` +
-      `<span class="msg-user" style="color:${esc(c)}">${esc(username)}</span>` +
-      `<span class="msg-sep">:</span>` +
-      `<span class="msg-text">${renderMessage(message, emotes)}</span>`;
+      const el = document.createElement('div');
+      el.className = 'msg';
+      const c = (color && color !== '#000000') ? color : (platform === 'twitch' ? '#9147ff' : '#ff3030');
 
-    msgs.appendChild(el);
-    if (autoScroll) msgs.scrollTop = msgs.scrollHeight;
-    while (msgs.children.length > 500) msgs.removeChild(msgs.firstChild);
+      let msgHtml;
+      try {
+        msgHtml = renderMessage(message, emotes);
+      } catch {
+        msgHtml = esc(message);   // fallback texte brut si les emotes plantent
+      }
 
-    msgCount++;
-    msgCountEl.textContent = msgCount > 999 ? '999+' : String(msgCount);
-    playPop();
+      el.innerHTML =
+        `<span class="badge badge-${platform === 'twitch' ? 'tw' : 'yt'}">${platform === 'twitch' ? 'TW' : 'YT'}</span>` +
+        `<span class="msg-user" style="color:${esc(c)}">${esc(username || '?')}</span>` +
+        `<span class="msg-sep">:</span>` +
+        `<span class="msg-text">${msgHtml}</span>`;
+
+      msgs.appendChild(el);
+      if (autoScroll) msgs.scrollTop = msgs.scrollHeight;
+      while (msgs.children.length > 500) msgs.removeChild(msgs.firstChild);
+
+      msgCount++;
+      msgCountEl.textContent = msgCount > 999 ? '999+' : String(msgCount);
+      playPop();
+    } catch (err) {
+      console.error('addMsg error:', err, { platform, username, message });
+    }
   }
 
   msgs.addEventListener('scroll', () => {

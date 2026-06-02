@@ -19,13 +19,31 @@ async function saveConfig() {
   await Bun.write(configPath, JSON.stringify(config, null, 2));
 }
 
-// ── Broadcast ─────────────────────────────────────────────────────────────────
+// ── Broadcast + message buffer (persisté sur disque) ─────────────────────────
 
 const clients = new Set<any>();
+const BUFFER_SIZE = 80;
+const bufferPath = `${import.meta.dir}/.msg-buffer.json`;
+
+// Charger l'historique existant
+let msgBuffer: object[] = [];
+try {
+  const f = Bun.file(bufferPath);
+  if (await f.exists()) msgBuffer = await f.json();
+} catch {}
+
+async function saveBuffer() {
+  await Bun.write(bufferPath, JSON.stringify(msgBuffer));
+}
 
 function broadcast(data: object) {
   const json = JSON.stringify(data);
   for (const ws of clients) { try { ws.send(json); } catch {} }
+  if ((data as any).type === "msg") {
+    msgBuffer.push(data);
+    if (msgBuffer.length > BUFFER_SIZE) msgBuffer.shift();
+    saveBuffer();   // fire-and-forget
+  }
 }
 
 // ── Status ────────────────────────────────────────────────────────────────────
@@ -262,6 +280,8 @@ const server = Bun.serve({
   websocket: {
     open(ws) {
       clients.add(ws);
+      // Rejouer les derniers messages avant tout
+      for (const m of msgBuffer) { try { ws.send(JSON.stringify(m)); } catch {} }
       ws.send(JSON.stringify({ type: "config", data: config }));
       ws.send(JSON.stringify({ type: "status", twitch: twitchConnected, youtube: youtubeConnected }));
       ws.send(JSON.stringify({ type: "viewers", twitch: viewersTwitch, youtube: viewersYoutube }));
@@ -274,10 +294,15 @@ const server = Bun.serve({
         if (data.type === "save_config") {
           const next = data.config as Config;
 
-          if (next.twitch.channel !== config.twitch.channel) {
-            config.twitch.channel = next.twitch.channel;
-            connectTwitch(config.twitch.channel);
-          }
+          const channelChanged = next.twitch.channel !== config.twitch.channel;
+          const twCredsChanged =
+            next.twitch.clientId !== config.twitch.clientId ||
+            next.twitch.clientSecret !== config.twitch.clientSecret;
+
+          config.twitch = next.twitch;   // mise à jour complète
+
+          if (channelChanged) connectTwitch(config.twitch.channel);
+          if (twCredsChanged) { twitchToken = ""; pollTwitchViewers(); }
 
           const ytChanged =
             next.youtube.apiKey !== config.youtube.apiKey ||
@@ -288,11 +313,6 @@ const server = Bun.serve({
             startYoutube(config.youtube.apiKey, config.youtube.videoId);
             pollYoutubeViewers();
           }
-
-          const twCredsChanged =
-            next.twitch.clientId !== config.twitch.clientId ||
-            next.twitch.clientSecret !== config.twitch.clientSecret;
-          if (twCredsChanged) { twitchToken = ""; pollTwitchViewers(); }
 
           await saveConfig();
           ws.send(JSON.stringify({ type: "saved" }));

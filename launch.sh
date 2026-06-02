@@ -5,9 +5,10 @@
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Arrêter un éventuel serveur déjà lancé sur ce port
+# Fermer proprement toute instance existante (Chromium + serveur Bun)
+pkill -9 -f "user-data-dir=.*chromium-stream-chat" 2>/dev/null || true
 fuser -k 7432/tcp 2>/dev/null || true
-sleep 0.3
+sleep 0.8
 
 # Démarrer le serveur Bun en arrière-plan
 cd "$SCRIPT_DIR"
