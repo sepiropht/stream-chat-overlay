@@ -187,7 +187,8 @@ async function pollYoutube(apiKey: string) {
     }
 
     ytNextPageToken = data.nextPageToken ?? "";
-    const interval: number = data.pollingIntervalMillis ?? 10_000;
+    // Minimum 20s pour préserver le quota (10 000 unités/jour = ~555 appels/heure max)
+    const interval: number = Math.max(data.pollingIntervalMillis ?? 20_000, 20_000);
 
     for (const item of (data.items ?? [])) {
       if (item.snippet.type !== "textMessageEvent") continue;
